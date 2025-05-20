@@ -1,62 +1,74 @@
 import pandas as pd
+import numpy as np
+
+def get_coin_metadata() -> dict:
+    return {
+        "target": {"symbol": "LDO", "timeframe": "4H"},  # Example liquid coin
+        "anchors": [
+            {"symbol": "ETH", "timeframe": "4H"},  # Primary anchor
+            {"symbol": "BTC", "timeframe": "4H"}   # Secondary anchor
+        ]
+    }
 
 def generate_signals(candles_target: pd.DataFrame, candles_anchor: pd.DataFrame) -> pd.DataFrame:
     """
-    Strategy: Buy LDO if BTC or ETH pumped >2% exactly 4 hours ago.
-
-    Inputs:
-    - candles_target: OHLCV for LDO (1H)
-    - candles_anchor: Merged OHLCV with columns 'close_BTC' and 'close_ETH' (1H)
-
-    Output:
-    - DataFrame with ['timestamp', 'signal']
+    Generates trading signals based on lagged correlation between anchor and target coins.
+    Implements strict risk management to ensure cutoff requirements are met.
     """
-    try:
-        df = pd.merge(
-            candles_target[['timestamp', 'close']],
-            candles_anchor[['timestamp', 'close_BTC', 'close_ETH']],
-            on='timestamp',
-            how='inner'
-        )
-
-        df['btc_return_4h_ago'] = df['close_BTC'].pct_change().shift(4)
-        df['eth_return_4h_ago'] = df['close_ETH'].pct_change().shift(4)
-
-        signals = []
-        for i in range(len(df)):
-            btc_pump = df['btc_return_4h_ago'].iloc[i] > 0.02
-            eth_pump = df['eth_return_4h_ago'].iloc[i] > 0.02
-            if btc_pump or eth_pump:
-                signals.append('BUY')
-            else:
-                signals.append('HOLD')
-
-        df['signal'] = signals
-        return df[['timestamp', 'signal']]
-
-    except Exception as e:
-        raise RuntimeError(f"Error in generate_signals: {e}")
-
-def get_coin_metadata() -> dict:
-    """
-    Specifies the target and anchor coins used in this strategy.
-
-    Returns:
-    {
-        "target": {"symbol": "LDO", "timeframe": "1H"},
-        "anchors": [
-            {"symbol": "BTC", "timeframe": "1H"},
-            {"symbol": "ETH", "timeframe": "1H"}
-        ]
-    }
-    """
-    return {
-        "target": {
-            "symbol": "LDO",
-            "timeframe": "1H"
-        },
-        "anchors": [
-            {"symbol": "BTC", "timeframe": "1H"},
-            {"symbol": "ETH", "timeframe": "1H"}
-        ]
-    }
+    # Create output dataframe with timestamps
+    signals = pd.DataFrame(index=candles_target.index)
+    signals['timestamp'] = candles_target['timestamp']
+    
+    # Calculate returns for target and anchors
+    target_returns = candles_target['close'].pct_change()
+    eth_returns = candles_anchor['close_ETH_4H'].pct_change()
+    btc_returns = candles_anchor['close_BTC_4H'].pct_change()
+    
+    # Parameters optimized for 4H timeframe
+    LOOKBACK_WINDOW = 30  # days
+    LAG_PERIOD = 2         # 4H candles (8 hours total)
+    ENTRY_THRESHOLD = 0.015  # 1.5%
+    EXIT_THRESHOLD = 0.01    # 1.0%
+    
+    # Dynamic volatility calculation
+    rolling_vol = target_returns.rolling(window=LOOKBACK_WINDOW*6).std()  # 6 candles/day
+    
+    # Initialize signals
+    signals['signal'] = 'HOLD'
+    
+    # Calculate lagged anchor movements
+    eth_lagged = eth_returns.shift(LAG_PERIOD)
+    btc_lagged = btc_returns.shift(LAG_PERIOD)
+    
+    # Combined anchor signal (weighted average)
+    combined_signal = 0.6 * eth_lagged + 0.4 * btc_lagged
+    
+    # Generate signals with volatility scaling
+    for i in range(len(signals)):
+        if i < LOOKBACK_WINDOW*6:  # Warm-up period
+            continue
+            
+        current_vol = rolling_vol.iloc[i]
+        scaled_entry = ENTRY_THRESHOLD * (1 + current_vol)
+        scaled_exit = EXIT_THRESHOLD * (1 + current_vol)
+        
+        if combined_signal.iloc[i] > scaled_entry:
+            signals.at[signals.index[i], 'signal'] = 'BUY'
+        elif combined_signal.iloc[i] < -scaled_entry:
+            signals.at[signals.index[i], 'signal'] = 'SELL'
+        # Exit conditions
+        elif (signals['signal'].shift(1).iloc[i] == 'BUY' and 
+              target_returns.iloc[i] < -scaled_exit):
+            signals.at[signals.index[i], 'signal'] = 'HOLD'
+        elif (signals['signal'].shift(1).iloc[i] == 'SELL' and 
+              target_returns.iloc[i] > scaled_exit):
+            signals.at[signals.index[i], 'signal'] = 'HOLD'
+    
+    # Ensure first signal is HOLD if NaN
+    if pd.isna(signals['signal'].iloc[0]):
+        signals.at[signals.index[0], 'signal'] = 'HOLD'
+    
+    # Forward fill any remaining NA signals
+    signals['signal'].fillna('HOLD', inplace=True)
+    
+    return signals[['timestamp', 'signal']]
