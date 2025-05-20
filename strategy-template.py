@@ -8,7 +8,7 @@ import pandas as pd
 
 # 🚀 TARGET COIN to trade (this is the coin you'll generate BUY/SELL/HOLD for)
 TARGET_COIN = "LDO"       # Example: "LDO", "BONK", "RAY"
-TIMEFRAME = "1h"          # Timeframe of your strategy: "1H", "4H", "1D"
+TIMEFRAME = "1H"          # Timeframe of your strategy: "1H", "4H", "1D"
 
 # 🧭 ANCHOR COINS used to derive signals (these are the coins you observe for movement)
 # You MUST define each anchor coin and the timeframe of its OHLCV data
