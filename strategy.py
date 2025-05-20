@@ -3,10 +3,10 @@ import numpy as np
 
 def get_coin_metadata() -> dict:
     return {
-        "target": {"symbol": "LDO", "timeframe": "4H"},  # Example liquid coin
+        "target": {"symbol": "LDO", "timeframe": "4h"},  # Example liquid coin
         "anchors": [
-            {"symbol": "ETH", "timeframe": "4H"},  # Primary anchor
-            {"symbol": "BTC", "timeframe": "4H"}   # Secondary anchor
+            {"symbol": "ETH", "timeframe": "4h"},  # Primary anchor
+            {"symbol": "BTC", "timeframe": "4h"}   # Secondary anchor
         ]
     }
 
